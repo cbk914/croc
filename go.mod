@@ -19,7 +19,7 @@ require (
 	github.com/schollz/progressbar/v3 v3.5.1
 	github.com/schollz/spinner v0.0.0-20180925172146-6bbc5f7804f9
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
-	github.com/stretchr/testify v1.4.0
+	github.com/stretchr/testify v1.6.1
 	github.com/tscholl2/siec v0.0.0-20191122224205-8da93652b094
 	golang.org/x/crypto v0.0.0-20200820211705-5c72a883971a
 	golang.org/x/net v0.0.0-20200904194848-62affa334b73 // indirect

@@ -55,6 +55,8 @@ github.com/schollz/progressbar/v3 v3.5.0 h1:rVya3NTks1kFmuFKaLYWt/3TYDiE+Cxb1iXu
 github.com/schollz/progressbar/v3 v3.5.0/go.mod h1:Rp5lZwpgtYmlvmGo1FyDwXMqagyRBQYSDwzlP9QDu84=
 github.com/schollz/progressbar/v3 v3.5.1 h1:qRe3Gccl3pHOzFyw1qd3YA/XKhbfVUtRhYEza4Z7FPo=
 github.com/schollz/progressbar/v3 v3.5.1/go.mod h1:Rp5lZwpgtYmlvmGo1FyDwXMqagyRBQYSDwzlP9QDu84=
+github.com/schollz/progressbar/v3 v3.6.0 h1:eOA8whXuuGYhSuM2KV6tn4wDC+2F6jBtCFGyhpWWbI0=
+github.com/schollz/progressbar/v3 v3.6.0/go.mod h1:Rp5lZwpgtYmlvmGo1FyDwXMqagyRBQYSDwzlP9QDu84=
 github.com/schollz/spinner v0.0.0-20180925172146-6bbc5f7804f9 h1:y08o5oQ/slxXE/F0uh5dd8mdVvb+w4NLcNSDSq4c2F0=
 github.com/schollz/spinner v0.0.0-20180925172146-6bbc5f7804f9/go.mod h1:kCMoQsqzx4MzGJWaALr6tKyCnlrY0kILGLkA1FOiLF4=
 github.com/shurcooL/sanitized_anchor_name v1.0.0 h1:PdmoCO6wvbs+7yrJyMORt4/BmY5IYyJwS/kOiWx8mHo=

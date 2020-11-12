@@ -23,7 +23,6 @@ import (
 	"github.com/schollz/pake/v2"
 	"github.com/schollz/peerdiscovery"
 	"github.com/schollz/progressbar/v3"
-	"github.com/schollz/spinner"
 	"github.com/tscholl2/siec"
 
 	"github.com/schollz/croc/v8/src/comm"
@@ -61,6 +60,7 @@ type Options struct {
 	NoPrompt       bool
 	NoMultiplexing bool
 	DisableLocal   bool
+	OnlyLocal      bool
 	Ask            bool
 	SendingText    bool
 	NoCompress     bool
@@ -99,7 +99,6 @@ type Client struct {
 	conn []*comm.Comm
 
 	bar             *progressbar.ProgressBar
-	spinner         *spinner.Spinner
 	longestFilename int
 	firstSend       bool
 
@@ -107,6 +106,7 @@ type Client struct {
 	fread       *os.File
 	numfinished int
 	quit        chan bool
+	finishedNum int
 }
 
 // Chunk contains information about the
@@ -292,7 +292,7 @@ func (c *Client) broadcastOnLocalNetwork(useipv6 bool) {
 	settings := peerdiscovery.Settings{
 		Limit:     -1,
 		Payload:   []byte("croc" + c.Options.RelayPorts[0]),
-		Delay:     10 * time.Millisecond,
+		Delay:     20 * time.Millisecond,
 		TimeLimit: 30 * time.Second,
 	}
 	if useipv6 {
@@ -348,11 +348,14 @@ func (c *Client) Send(options TransferOptions) (err error) {
 	if err != nil {
 		return
 	}
-	otherRelay := ""
+	flags := &strings.Builder{}
 	if c.Options.RelayAddress != models.DEFAULT_RELAY {
-		otherRelay = "--relay " + c.Options.RelayAddress + " "
+		flags.WriteString("--relay " + c.Options.RelayAddress + " ")
 	}
-	fmt.Fprintf(os.Stderr, "Code is: %s\nOn the other computer run\n\ncroc %s%s\n", c.Options.SharedSecret, otherRelay, c.Options.SharedSecret)
+	if c.Options.RelayPassword != models.DEFAULT_PASSPHRASE {
+		flags.WriteString("--pass " + c.Options.RelayPassword + " ")
+	}
+	fmt.Fprintf(os.Stderr, "Code is: %[1]s\nOn the other computer run\n\ncroc %[2]s%[1]s\n", c.Options.SharedSecret, flags.String())
 	if c.Options.Ask {
 		machid, _ := machineid.ID()
 		fmt.Fprintf(os.Stderr, "\rYour machine ID is '%s'\n", machid)
@@ -367,93 +370,97 @@ func (c *Client) Send(options TransferOptions) (err error) {
 		// add two things to the error channel
 		errchan = make(chan error, 2)
 		c.setupLocalRelay()
-		go c.broadcastOnLocalNetwork(true)
+		// broadcast on ipv4
 		go c.broadcastOnLocalNetwork(false)
+		// broadcast on ipv6
+		go c.broadcastOnLocalNetwork(true)
 		go c.transferOverLocalRelay(options, errchan)
 	}
 
-	go func() {
-		var ipaddr, banner string
-		var conn *comm.Comm
-		durations := []time.Duration{100 * time.Millisecond, 5 * time.Second}
-		for i, address := range []string{c.Options.RelayAddress6, c.Options.RelayAddress} {
-			if address == "" {
-				continue
-			}
-			host, port, _ := net.SplitHostPort(address)
-			log.Debugf("host: '%s', port: '%s'", host, port)
-			// Default port to :9009
-			if port == "" {
-				host = address
-				port = "9009"
-			}
-			log.Debugf("got host '%v' and port '%v'", host, port)
-			address = net.JoinHostPort(host, port)
-			log.Debugf("trying connection to %s", address)
-			conn, banner, ipaddr, err = tcp.ConnectToTCPServer(address, c.Options.RelayPassword, c.Options.SharedSecret[:3], durations[i])
-			if err == nil {
-				c.Options.RelayAddress = address
-				break
-			}
-			log.Debugf("could not establish '%s'", address)
-		}
-		if conn == nil && err == nil {
-			err = fmt.Errorf("could not connect")
-		}
-		if err != nil {
-			err = fmt.Errorf("could not connect to %s: %w", c.Options.RelayAddress, err)
-			log.Debug(err)
-			errchan <- err
-			return
-		}
-		log.Debugf("banner: %s", banner)
-		log.Debugf("connection established: %+v", conn)
-		for {
-			log.Debug("waiting for bytes")
-			data, errConn := conn.Receive()
-			if errConn != nil {
-				log.Debugf("[%+v] had error: %s", conn, errConn.Error())
-			}
-			if bytes.Equal(data, []byte("ips?")) {
-				// recipient wants to try to connect to local ips
-				var ips []string
-				// only get local ips if the local is enabled
-				if !c.Options.DisableLocal {
-					// get list of local ips
-					ips, err = utils.GetLocalIPs()
-					if err != nil {
-						log.Debugf("error getting local ips: %v", err)
-					}
-					// prepend the port that is being listened to
-					ips = append([]string{c.Options.RelayPorts[0]}, ips...)
+	if !c.Options.OnlyLocal {
+		go func() {
+			var ipaddr, banner string
+			var conn *comm.Comm
+			durations := []time.Duration{100 * time.Millisecond, 5 * time.Second}
+			for i, address := range []string{c.Options.RelayAddress6, c.Options.RelayAddress} {
+				if address == "" {
+					continue
 				}
-				bips, _ := json.Marshal(ips)
-				if err := conn.Send(bips); err != nil {
-					log.Errorf("error sending: %v", err)
+				host, port, _ := net.SplitHostPort(address)
+				log.Debugf("host: '%s', port: '%s'", host, port)
+				// Default port to :9009
+				if port == "" {
+					host = address
+					port = "9009"
 				}
-			} else if bytes.Equal(data, []byte("handshake")) {
-				break
-			} else if bytes.Equal(data, []byte{1}) {
-				log.Debug("got ping")
-				continue
-			} else {
-				log.Debugf("[%+v] got weird bytes: %+v", conn, data)
-				// throttle the reading
-				errchan <- fmt.Errorf("gracefully refusing using the public relay")
+				log.Debugf("got host '%v' and port '%v'", host, port)
+				address = net.JoinHostPort(host, port)
+				log.Debugf("trying connection to %s", address)
+				conn, banner, ipaddr, err = tcp.ConnectToTCPServer(address, c.Options.RelayPassword, c.Options.SharedSecret[:3], durations[i])
+				if err == nil {
+					c.Options.RelayAddress = address
+					break
+				}
+				log.Debugf("could not establish '%s'", address)
+			}
+			if conn == nil && err == nil {
+				err = fmt.Errorf("could not connect")
+			}
+			if err != nil {
+				err = fmt.Errorf("could not connect to %s: %w", c.Options.RelayAddress, err)
+				log.Debug(err)
+				errchan <- err
 				return
 			}
-		}
+			log.Debugf("banner: %s", banner)
+			log.Debugf("connection established: %+v", conn)
+			for {
+				log.Debug("waiting for bytes")
+				data, errConn := conn.Receive()
+				if errConn != nil {
+					log.Debugf("[%+v] had error: %s", conn, errConn.Error())
+				}
+				if bytes.Equal(data, []byte("ips?")) {
+					// recipient wants to try to connect to local ips
+					var ips []string
+					// only get local ips if the local is enabled
+					if !c.Options.DisableLocal {
+						// get list of local ips
+						ips, err = utils.GetLocalIPs()
+						if err != nil {
+							log.Debugf("error getting local ips: %v", err)
+						}
+						// prepend the port that is being listened to
+						ips = append([]string{c.Options.RelayPorts[0]}, ips...)
+					}
+					bips, _ := json.Marshal(ips)
+					if err := conn.Send(bips); err != nil {
+						log.Errorf("error sending: %v", err)
+					}
+				} else if bytes.Equal(data, []byte("handshake")) {
+					break
+				} else if bytes.Equal(data, []byte{1}) {
+					log.Debug("got ping")
+					continue
+				} else {
+					log.Debugf("[%+v] got weird bytes: %+v", conn, data)
+					// throttle the reading
+					errchan <- fmt.Errorf("gracefully refusing using the public relay")
+					return
+				}
+			}
 
-		c.conn[0] = conn
-		c.Options.RelayPorts = strings.Split(banner, ",")
-		if c.Options.NoMultiplexing {
-			log.Debug("no multiplexing")
-			c.Options.RelayPorts = []string{c.Options.RelayPorts[0]}
-		}
-		c.ExternalIP = ipaddr
-		log.Debug("exchanged header message")
-		errchan <- c.transfer(options)
-	}()
+			c.conn[0] = conn
+			c.Options.RelayPorts = strings.Split(banner, ",")
+			if c.Options.NoMultiplexing {
+				log.Debug("no multiplexing")
+				c.Options.RelayPorts = []string{c.Options.RelayPorts[0]}
+			}
+			c.ExternalIP = ipaddr
+			log.Debug("exchanged header message")
+			errchan <- c.transfer(options)
+		}()
+	}
 
 	err = <-errchan
 	if err == nil {
@@ -480,6 +487,10 @@ func (c *Client) Receive() (err error) {
 	// recipient will look for peers first
 	// and continue if it doesn't find any within 100 ms
 	usingLocal := false
+	if c.Options.OnlyLocal {
+		c.Options.RelayAddress = ""
+		c.Options.RelayAddress6 = ""
+	}
 	if !c.Options.DisableLocal {
 		log.Debug("attempt to discover peers")
 		var discoveries []peerdiscovery.Discovered
@@ -491,13 +502,13 @@ func (c *Client) Receive() (err error) {
 			ipv4discoveries, err1 := peerdiscovery.Discover(peerdiscovery.Settings{
 				Limit:     1,
 				Payload:   []byte("ok"),
-				Delay:     10 * time.Millisecond,
+				Delay:     20 * time.Millisecond,
 				TimeLimit: 200 * time.Millisecond,
 			})
 			if err1 == nil && len(ipv4discoveries) > 0 {
 				dmux.Lock()
 				err = err1
-				discoveries = ipv4discoveries
+				discoveries = append(discoveries, ipv4discoveries...)
 				dmux.Unlock()
 			}
 		}()
@@ -506,20 +517,21 @@ func (c *Client) Receive() (err error) {
 			ipv6discoveries, err1 := peerdiscovery.Discover(peerdiscovery.Settings{
 				Limit:     1,
 				Payload:   []byte("ok"),
-				Delay:     10 * time.Millisecond,
+				Delay:     20 * time.Millisecond,
 				TimeLimit: 200 * time.Millisecond,
 				IPVersion: peerdiscovery.IPv6,
 			})
 			if err1 == nil && len(ipv6discoveries) > 0 {
 				dmux.Lock()
 				err = err1
-				discoveries = ipv6discoveries
+				discoveries = append(discoveries, ipv6discoveries...)
 				dmux.Unlock()
 			}
 		}()
 		wgDiscovery.Wait()
 
 		if err == nil && len(discoveries) > 0 {
+			log.Debugf("all discoveries: %+v", discoveries)
 			for i := 0; i < len(discoveries); i++ {
 				log.Debugf("discovery %d has payload: %+v", i, discoveries[i])
 				if !bytes.HasPrefix(discoveries[i].Payload, []byte("croc")) {
@@ -531,12 +543,15 @@ func (c *Client) Receive() (err error) {
 				if portToUse == "" {
 					portToUse = "9009"
 				}
-				c.Options.RelayAddress = net.JoinHostPort(discoveries[0].Address, portToUse)
-				c.ExternalIPConnected = c.Options.RelayAddress
-				c.Options.RelayAddress6 = ""
-				usingLocal = true
-
-				break
+				address := net.JoinHostPort(discoveries[0].Address, portToUse)
+				if tcp.PingServer(address) == nil {
+					log.Debugf("succesfully pinged '%s'", address)
+					c.Options.RelayAddress = address
+					c.ExternalIPConnected = c.Options.RelayAddress
+					c.Options.RelayAddress6 = ""
+					usingLocal = true
+					break
+				}
 			}
 		}
 		log.Debugf("discoveries: %+v", discoveries)
@@ -544,6 +559,7 @@ func (c *Client) Receive() (err error) {
 	}
 	var banner string
 	durations := []time.Duration{100 * time.Millisecond, 5 * time.Second}
+	err = fmt.Errorf("found no addresses to connect")
 	for i, address := range []string{c.Options.RelayAddress6, c.Options.RelayAddress} {
 		if address == "" {
 			continue
@@ -1150,7 +1166,7 @@ func (c *Client) createEmptyFileAndFinish(fileInfo FileInfo, i int) (err error) 
 	}
 	c.bar = progressbar.NewOptions64(1,
 		progressbar.OptionOnCompletion(func() {
-			fmt.Fprintf(os.Stderr, " ✔️\n")
+			c.fmtPrintUpdate()
 		}),
 		progressbar.OptionSetWidth(20),
 		progressbar.OptionSetDescription(description),
@@ -1209,6 +1225,13 @@ func (c *Client) updateIfRecipientHasFileInfo() (err error) {
 	return
 }
 
+func (c *Client) fmtPrintUpdate() {
+	c.finishedNum++
+	if len(c.FilesToTransfer) > 1 {
+		fmt.Fprintf(os.Stderr, " %d/%d\n", c.finishedNum, len(c.FilesToTransfer))
+	}
+}
+
 func (c *Client) updateState() (err error) {
 	err = c.updateIfSenderChannelSecured()
 	if err != nil {
@@ -1236,7 +1259,7 @@ func (c *Client) updateState() (err error) {
 					}
 					c.bar = progressbar.NewOptions64(1,
 						progressbar.OptionOnCompletion(func() {
-							fmt.Fprintf(os.Stderr, " ✔️\n")
+							c.fmtPrintUpdate()
 						}),
 						progressbar.OptionSetWidth(20),
 						progressbar.OptionSetDescription(description),
@@ -1281,7 +1304,7 @@ func (c *Client) setBar() {
 	c.bar = progressbar.NewOptions64(
 		c.FilesToTransfer[c.FilesToTransferCurrentNum].Size,
 		progressbar.OptionOnCompletion(func() {
-			fmt.Fprintf(os.Stderr, " ✔️\n")
+			c.fmtPrintUpdate()
 		}),
 		progressbar.OptionSetWidth(20),
 		progressbar.OptionSetDescription(description),
@@ -1364,8 +1387,6 @@ func (c *Client) receiveData(i int) {
 			}
 		}
 	}
-
-	return
 }
 
 func (c *Client) sendData(i int) {
@@ -1434,8 +1455,6 @@ func (c *Client) sendData(i int) {
 				c.bar.Add(n)
 				c.TotalSent += int64(n)
 				// time.Sleep(100 * time.Millisecond)
-			} else {
-				// log.Debugf("skipping chunk %d", pos)
 			}
 		}
 
@@ -1449,5 +1468,4 @@ func (c *Client) sendData(i int) {
 			panic(errRead)
 		}
 	}
-	return
 }

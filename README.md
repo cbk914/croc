@@ -4,7 +4,7 @@
     src="https://user-images.githubusercontent.com/6550035/46709024-9b23ad00-cbf6-11e8-9fb2-ca8b20b7dbec.jpg"
     width="408px" border="0" alt="croc">
 <br>
-<a href="https://github.com/schollz/croc/releases/latest"><img src="https://img.shields.io/badge/version-v8.3.2-brightgreen.svg?style=flat-square" alt="Version"></a>
+<a href="https://github.com/schollz/croc/releases/latest"><img src="https://img.shields.io/badge/version-v8.6.5-brightgreen.svg?style=flat-square" alt="Version"></a>
 <a href="https://coveralls.io/github/schollz/croc"><img src="https://img.shields.io/badge/coverage-81%25-green.svg?style=flat-square" alt="Coverage"></a>
 <a href="https://travis-ci.org/schollz/croc"><img
 src="https://img.shields.io/travis/schollz/croc.svg?style=flat-square" alt="Build
@@ -20,6 +20,7 @@ Status"></a>
 - allows **resuming transfers** that are interrupted
 - local server or port-forwarding **not needed**
 - **ipv6-first** with ipv4 fallback
+- can **use proxy**, like tor
 
 For more information about `croc`, see [my blog post](https://schollz.com/software/croc6).
 
@@ -155,6 +156,15 @@ $ croc send --text "hello world"
 ```
 
 This will automatically tell the receiver to use `stdout` when they receive the text so it will be displayed.
+
+
+### Use a proxy
+
+You can use a proxy as your connection to the relay by adding a proxy address with `--socks5`. For example, you can send via a tor relay:
+
+```
+$ croc --socks5 "127.0.0.1:9050" send SOMEFILE
+```
 
 ### Self-host relay
 

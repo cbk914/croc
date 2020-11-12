@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/schollz/cli/v2"
+	"github.com/schollz/croc/v8/src/comm"
 	"github.com/schollz/croc/v8/src/croc"
 	"github.com/schollz/croc/v8/src/models"
 	"github.com/schollz/croc/v8/src/tcp"
@@ -32,7 +33,7 @@ func Run() (err error) {
 	app := cli.NewApp()
 	app.Name = "croc"
 	if Version == "" {
-		Version = "v8.3.2-7d155ad"
+		Version = "v8.6.5-8d430b6"
 	}
 	app.Version = Version
 	app.Compiled = time.Now()
@@ -41,7 +42,10 @@ func Run() (err error) {
       croc send file.txt
 
    Send a file with a custom code:
-      croc send --code secret-passphrase file.txt`
+      croc send --code secret-code file.txt
+
+   Receive a file using code:
+      croc secret-code`
 	app.Commands = []*cli.Command{
 		{
 			Name:        "send",
@@ -80,10 +84,12 @@ func Run() (err error) {
 		&cli.BoolFlag{Name: "stdout", Usage: "redirect file to stdout"},
 		&cli.BoolFlag{Name: "no-compress", Usage: "disable compression"},
 		&cli.BoolFlag{Name: "ask", Usage: "make sure sender and recipient are prompted"},
+		&cli.BoolFlag{Name: "local", Usage: "force to use only local connections"},
 		&cli.StringFlag{Name: "relay", Value: models.DEFAULT_RELAY, Usage: "address of the relay", EnvVars: []string{"CROC_RELAY"}},
 		&cli.StringFlag{Name: "relay6", Value: models.DEFAULT_RELAY6, Usage: "ipv6 address of the relay", EnvVars: []string{"CROC_RELAY6"}},
 		&cli.StringFlag{Name: "out", Value: ".", Usage: "specify an output folder to receive the file"},
-		&cli.StringFlag{Name: "pass", Value: "pass123", Usage: "password for the relay", EnvVars: []string{"CROC_PASS"}},
+		&cli.StringFlag{Name: "pass", Value: models.DEFAULT_PASSPHRASE, Usage: "password for the relay", EnvVars: []string{"CROC_PASS"}},
+		&cli.StringFlag{Name: "socks5", Value: "", Usage: "add a socks5 proxy", EnvVars: []string{"SOCKS5_PROXY"}},
 	}
 	app.EnableBashCompletion = true
 	app.HideHelp = false
@@ -92,10 +98,10 @@ func Run() (err error) {
 		allStringsAreFiles := func(strs []string) bool {
 			for _, str := range strs {
 				if !utils.Exists(str) {
-					return false;
+					return false
 				}
 			}
-			return true;
+			return true
 		}
 
 		// if trying to send but forgot send, let the user know
@@ -103,7 +109,7 @@ func Run() (err error) {
 			fnames := []string{}
 			for _, fpath := range c.Args().Slice() {
 				_, basename := filepath.Split(fpath)
-				fnames = append(fnames, "'" + basename + "'")
+				fnames = append(fnames, "'"+basename+"'")
 			}
 			yn := utils.GetInput(fmt.Sprintf("Did you mean to send %s? (y/n) ", strings.Join(fnames, ", ")))
 			if strings.ToLower(yn) == "y" {
@@ -159,6 +165,7 @@ func determinePass(c *cli.Context) (pass string) {
 
 func send(c *cli.Context) (err error) {
 	setDebugLevel(c)
+	comm.Socks5Proxy = c.String("socks5")
 	crocOptions := croc.Options{
 		SharedSecret:   c.String("code"),
 		IsSender:       true,
@@ -168,6 +175,7 @@ func send(c *cli.Context) (err error) {
 		RelayAddress6:  c.String("relay6"),
 		Stdout:         c.Bool("stdout"),
 		DisableLocal:   c.Bool("no-local"),
+		OnlyLocal:      c.Bool("local"),
 		RelayPorts:     strings.Split(c.String("ports"), ","),
 		Ask:            c.Bool("ask"),
 		NoMultiplexing: c.Bool("no-multi"),
@@ -356,6 +364,7 @@ func saveConfig(c *cli.Context, crocOptions croc.Options) {
 }
 
 func receive(c *cli.Context) (err error) {
+	comm.Socks5Proxy = c.String("socks5")
 	crocOptions := croc.Options{
 		SharedSecret:  c.String("code"),
 		IsSender:      false,
@@ -366,6 +375,7 @@ func receive(c *cli.Context) (err error) {
 		Stdout:        c.Bool("stdout"),
 		Ask:           c.Bool("ask"),
 		RelayPassword: determinePass(c),
+		OnlyLocal:     c.Bool("local"),
 	}
 	if crocOptions.RelayAddress != models.DEFAULT_RELAY {
 		crocOptions.RelayAddress6 = ""
